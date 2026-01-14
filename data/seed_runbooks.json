@@ -1,0 +1,86 @@
+{
+  "deployment": {
+    "name": "Deployment Incident Runbook",
+    "description": "Steps for handling deployment-related incidents",
+    "runbook_url": "https://wiki.company.com/runbooks/deployment-incident",
+    "steps": [
+      "Check deployment pipeline status",
+      "Review recent deployment logs",
+      "Verify container health and resource usage",
+      "Check for configuration drift",
+      "Rollback if necessary using deployment rollback procedure"
+    ]
+  },
+  "database": {
+    "name": "Database Incident Runbook",
+    "description": "Steps for handling database-related incidents",
+    "runbook_url": "https://wiki.company.com/runbooks/database-incident",
+    "steps": [
+      "Check database connection pool status",
+      "Review slow query logs",
+      "Check disk space and I/O metrics",
+      "Verify replication status if applicable",
+      "Consider read replica failover if primary is impacted"
+    ]
+  },
+  "network": {
+    "name": "Network Incident Runbook",
+    "description": "Steps for handling network-related incidents",
+    "runbook_url": "https://wiki.company.com/runbooks/network-incident",
+    "steps": [
+      "Check network connectivity between services",
+      "Review load balancer health checks",
+      "Verify DNS resolution",
+      "Check for certificate expiration",
+      "Review firewall rules and security groups"
+    ]
+  },
+  "application": {
+    "name": "Application Incident Runbook",
+    "description": "Steps for handling application-related incidents",
+    "runbook_url": "https://wiki.company.com/runbooks/application-incident",
+    "steps": [
+      "Check application logs for errors",
+      "Review memory and CPU usage",
+      "Check for dependency failures",
+      "Verify cache connectivity",
+      "Review recent code changes"
+    ]
+  },
+  "security": {
+    "name": "Security Incident Runbook",
+    "description": "Steps for handling security-related incidents",
+    "runbook_url": "https://wiki.company.com/runbooks/security-incident",
+    "steps": [
+      "IMMEDIATELY escalate to Security team",
+      "Document all observations with timestamps",
+      "DO NOT attempt remediation without Security approval",
+      "Preserve all logs and evidence",
+      "Prepare for potential system isolation"
+    ]
+  },
+  "infrastructure": {
+    "name": "Infrastructure Incident Runbook",
+    "description": "Steps for handling infrastructure-related incidents",
+    "runbook_url": "https://wiki.company.com/runbooks/infrastructure-incident",
+    "steps": [
+      "Check cloud provider status page",
+      "Review infrastructure monitoring dashboards",
+      "Check auto-scaling group status",
+      "Verify instance health across regions",
+      "Review recent infrastructure changes"
+    ]
+  },
+  "unknown": {
+    "name": "General Incident Runbook",
+    "description": "General steps for unclassified incidents",
+    "runbook_url": "https://wiki.company.com/runbooks/general-incident",
+    "steps": [
+      "Gather initial information about the incident",
+      "Check monitoring dashboards for anomalies",
+      "Review recent changes across systems",
+      "Escalate to appropriate team based on symptoms",
+      "Document findings for post-incident review"
+    ]
+  }
+}

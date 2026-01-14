@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  incident-autopilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: incident-autopilot
+    ports:
+      - "8000:8000"
+    environment:
+      # Webhook Security
+      - AUTOPILOT_WEBHOOK_SECRET=${AUTOPILOT_WEBHOOK_SECRET:-change-me-in-production}
+
+      # LLM Configuration
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
+
+      # Jira Configuration
+      - JIRA_BASE_URL=${JIRA_BASE_URL:-https://your-domain.atlassian.net}
+      - JIRA_EMAIL=${JIRA_EMAIL:-}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN:-}
+
+      # Slack Configuration
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
+      - SLACK_CHANNEL=${SLACK_CHANNEL:-#incidents}
+
+      # Database
+      - DATABASE_URL=sqlite:///./data/audit.db
+      - AUDIT_JSONL_PATH=./data/audit.jsonl
+
+      # Feature Flags
+      - DRY_RUN=${DRY_RUN:-true}
+
+      # Rate Limiting
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
+
+      # Correlation
+      - CORRELATION_WINDOW_MINUTES=${CORRELATION_WINDOW_MINUTES:-30}
+
+      # Timeouts
+      - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  data:
