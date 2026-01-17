@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Header, Query
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.db import get_database
@@ -16,7 +17,6 @@ from app.models import (
     IncidentStatus,
     IncidentListItem,
     IncidentListResponse,
-    DecisionRequest,
     PIRResponse,
     TriageResult,
     Severity,
@@ -24,7 +24,7 @@ from app.models import (
     IncidentType,
     NormalizedIncident,
 )
-from app.services.llm_client import get_llm_client
+from app.services.llm_client import get_llm_client, MockProvider
 from app.services.policy import get_policy_engine
 from app.services.risk import calculate_risk_score
 from app.services.runbook_matcher import match_runbooks, list_all_runbooks
@@ -37,6 +37,17 @@ router = APIRouter(prefix="/api", tags=["incidents"])
 
 # Demo token for AI triage access
 DEMO_TOKEN = "incident-autopilot-demo-2024"
+
+
+# Request models for new endpoints
+class OverrideRequest(BaseModel):
+    severity: Optional[str] = None
+    category: Optional[str] = None
+    reason: str
+
+
+class ResolveRequest(BaseModel):
+    resolution_note: str
 
 
 def _init_incidents_table():
@@ -133,25 +144,106 @@ def _incident_to_list_item(incident: StoredIncident) -> IncidentListItem:
     )
 
 
-@router.post("/incidents", response_model=StoredIncident)
-async def create_incident(
-    incident: IncidentCreate,
-    x_demo_token: Optional[str] = Header(None, alias="X-Demo-Token"),
-):
-    """
-    Create a new incident and run AI triage.
-
-    Without demo token: Uses mock AI (keyword-based).
-    With valid demo token: Uses configured LLM provider.
-    """
+def _get_incident_row(incident_id: str) -> dict:
+    """Get raw incident row from database."""
     db = get_database()
-    settings = get_settings()
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM web_incidents WHERE id = ?", (incident_id,))
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return dict(row)
 
-    # Generate unique ID
+
+def _update_incident(incident_id: str, **kwargs):
+    """Update incident fields in database."""
+    db = get_database()
+    kwargs["updated_at"] = datetime.utcnow().isoformat()
+
+    set_clause = ", ".join(f"{k} = ?" for k in kwargs.keys())
+    values = list(kwargs.values()) + [incident_id]
+
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE web_incidents SET {set_clause} WHERE id = ?",
+            values
+        )
+
+
+async def _run_triage(incident_id: str, title: str, description: str,
+                      component: str, environment: Environment) -> TriageResult:
+    """Run AI triage on an incident."""
+    # Create normalized incident for triage
+    normalized = NormalizedIncident(
+        jira_key=incident_id,
+        summary=title,
+        description=description,
+        component=component,
+        environment=environment,
+        reporter="web-user",
+        labels=[],
+        created_at=datetime.utcnow(),
+        raw_payload={},
+    )
+
+    # Use mock provider for demo safety
+    class MockLLMClient:
+        def __init__(self):
+            self.provider = MockProvider()
+        async def triage(self, incident):
+            return await self.provider.triage(incident)
+
+    llm_client = MockLLMClient()
+    llm_result = await llm_client.triage(normalized)
+
+    # Apply policy guardrails
+    policy_result = get_policy_engine().apply_policies(normalized, llm_result)
+
+    # Calculate risk score
+    risk_score = calculate_risk_score(
+        severity=policy_result.final_severity,
+        confidence=llm_result.confidence,
+        environment=environment,
+    )
+
+    # Match runbooks
+    primary_runbook, alternative_runbooks = match_runbooks(
+        incident_type=llm_result.incident_type,
+        title=title,
+        description=description,
+    )
+
+    # Build triage result
+    return TriageResult(
+        incident_type=llm_result.incident_type,
+        severity=policy_result.final_severity,
+        confidence=llm_result.confidence,
+        risk_score=risk_score,
+        owner_team=llm_result.owner_team,
+        short_summary=llm_result.short_summary,
+        first_actions=llm_result.first_actions,
+        primary_runbook=primary_runbook,
+        alternative_runbooks=alternative_runbooks,
+        needs_human_review=policy_result.needs_human_review,
+        policy_override_reason=policy_result.override_reason,
+    )
+
+
+# ============================================
+# CRUD Endpoints
+# ============================================
+
+@router.post("/incidents", response_model=StoredIncident)
+async def create_incident(incident: IncidentCreate):
+    """Create a new incident (without triage - call /triage separately)."""
+    db = get_database()
+
     incident_id = str(uuid.uuid4())[:8]
     now = datetime.utcnow()
 
-    # Log incident creation
+    # Log creation
     get_audit_service().log(
         event_type="incident_created",
         jira_key=incident_id,
@@ -161,113 +253,14 @@ async def create_incident(
         details={"title": incident.title, "source": "web_form"},
     )
 
-    # Check demo token for AI provider selection
-    use_real_ai = x_demo_token == DEMO_TOKEN and settings.llm_provider != "mock"
-
-    # Create normalized incident for triage
-    normalized = NormalizedIncident(
-        jira_key=incident_id,
-        summary=incident.title,
-        description=incident.description,
-        component=incident.component,
-        environment=incident.environment,
-        reporter=incident.reporter,
-        labels=[],
-        created_at=now,
-        raw_payload={},
-    )
-
-    # Run LLM triage
-    try:
-        if use_real_ai:
-            llm_client = get_llm_client()
-        else:
-            # Force mock provider for demo safety
-            from app.services.llm_client import MockProvider
-            class MockLLMClient:
-                def __init__(self):
-                    self.provider = MockProvider()
-                async def triage(self, incident):
-                    return await self.provider.triage(incident)
-            llm_client = MockLLMClient()
-
-        llm_result = await llm_client.triage(normalized)
-
-        # Apply policy guardrails
-        policy_result = get_policy_engine().apply_policies(normalized, llm_result)
-
-        # Calculate risk score
-        risk_score = calculate_risk_score(
-            severity=policy_result.final_severity,
-            confidence=llm_result.confidence,
-            environment=incident.environment,
-        )
-
-        # Match runbooks
-        primary_runbook, alternative_runbooks = match_runbooks(
-            incident_type=llm_result.incident_type,
-            title=incident.title,
-            description=incident.description,
-        )
-
-        # Build triage result
-        triage = TriageResult(
-            incident_type=llm_result.incident_type,
-            severity=policy_result.final_severity,
-            confidence=llm_result.confidence,
-            risk_score=risk_score,
-            owner_team=llm_result.owner_team,
-            short_summary=llm_result.short_summary,
-            first_actions=llm_result.first_actions,
-            primary_runbook=primary_runbook,
-            alternative_runbooks=alternative_runbooks,
-            needs_human_review=policy_result.needs_human_review,
-            policy_override_reason=policy_result.override_reason,
-        )
-
-        status = IncidentStatus.TRIAGED
-
-        # Log triage
-        get_audit_service().log(
-            event_type="incident_triaged",
-            jira_key=incident_id,
-            component=incident.component,
-            severity=policy_result.final_severity.value,
-            action="ai_triage",
-            status="success",
-            details={
-                "incident_type": llm_result.incident_type.value,
-                "confidence": llm_result.confidence,
-                "risk_score": risk_score,
-                "needs_human_review": policy_result.needs_human_review,
-                "used_real_ai": use_real_ai,
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"Triage failed for {incident_id}: {e}")
-        triage = None
-        status = IncidentStatus.PENDING
-
-        get_audit_service().log(
-            event_type="incident_triage_failed",
-            jira_key=incident_id,
-            component=incident.component,
-            action="ai_triage",
-            status="failure",
-            details={"error": str(e)},
-        )
-
-    # Store incident
-    triage_json = triage.model_dump_json() if triage else None
-
+    # Store incident (no triage yet)
     with db._get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
             INSERT INTO web_incidents
-            (id, title, description, component, environment, reporter, status, created_at, updated_at, triage_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, title, description, component, environment, reporter, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 incident_id,
@@ -276,10 +269,9 @@ async def create_incident(
                 incident.component,
                 incident.environment.value,
                 incident.reporter,
-                status.value,
+                IncidentStatus.PENDING.value,
                 now.isoformat(),
                 now.isoformat(),
-                triage_json,
             ),
         )
 
@@ -290,10 +282,10 @@ async def create_incident(
         component=incident.component,
         environment=incident.environment,
         reporter=incident.reporter,
-        status=status,
+        status=IncidentStatus.PENDING,
         created_at=now,
         updated_at=now,
-        triage=triage,
+        triage=None,
     )
 
 
@@ -309,7 +301,6 @@ async def list_incidents(
     with db._get_connection() as conn:
         cursor = conn.cursor()
 
-        # Build query
         query = "SELECT * FROM web_incidents"
         params = []
 
@@ -323,7 +314,6 @@ async def list_incidents(
         cursor.execute(query, params)
         rows = [dict(row) for row in cursor.fetchall()]
 
-        # Get total count
         count_query = "SELECT COUNT(*) as total FROM web_incidents"
         if status:
             count_query += " WHERE status = ?"
@@ -341,114 +331,214 @@ async def list_incidents(
 @router.get("/incidents/{incident_id}", response_model=StoredIncident)
 async def get_incident(incident_id: str):
     """Get a single incident by ID."""
-    db = get_database()
-
-    with db._get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM web_incidents WHERE id = ?", (incident_id,))
-        row = cursor.fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Incident not found")
-
-    return _row_to_incident(dict(row))
+    row = _get_incident_row(incident_id)
+    return _row_to_incident(row)
 
 
-@router.post("/incidents/{incident_id}/decision", response_model=StoredIncident)
-async def make_decision(incident_id: str, decision: DecisionRequest):
-    """
-    Make a decision on a triaged incident.
+# ============================================
+# Action Endpoints (matching new frontend)
+# ============================================
 
-    Actions:
-    - approve: Accept the AI triage as-is
-    - reject: Reject the triage (requires re-triage or manual handling)
-    - override: Change the severity to a different value
-    """
-    db = get_database()
-    now = datetime.utcnow()
+@router.post("/incidents/{incident_id}/triage", response_model=StoredIncident)
+async def triage_incident(incident_id: str):
+    """Run AI triage on an incident."""
+    row = _get_incident_row(incident_id)
+    incident = _row_to_incident(row)
 
-    # Get existing incident
-    with db._get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM web_incidents WHERE id = ?", (incident_id,))
-        row = cursor.fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Incident not found")
-
-    incident = _row_to_incident(dict(row))
-
-    if incident.status == IncidentStatus.PENDING:
-        raise HTTPException(status_code=400, detail="Incident has not been triaged yet")
-
-    # Process decision
-    if decision.action == "approve":
-        new_status = IncidentStatus.APPROVED
-    elif decision.action == "reject":
-        new_status = IncidentStatus.REJECTED
-    elif decision.action == "override":
-        if not decision.new_severity:
-            raise HTTPException(status_code=400, detail="new_severity required for override")
-        new_status = IncidentStatus.OVERRIDDEN
-    else:
-        raise HTTPException(status_code=400, detail="Invalid action")
-
-    # Update triage if overriding
-    original_severity = None
-    triage_json = row["triage_json"]
-    if decision.action == "override" and incident.triage:
-        original_severity = incident.triage.severity
-        # Update severity in triage
-        updated_triage = incident.triage.model_copy()
-        updated_triage.severity = decision.new_severity
-        # Recalculate risk score
-        updated_triage.risk_score = calculate_risk_score(
-            severity=decision.new_severity,
-            confidence=updated_triage.confidence,
+    try:
+        triage = await _run_triage(
+            incident_id=incident_id,
+            title=incident.title,
+            description=incident.description,
+            component=incident.component,
             environment=incident.environment,
         )
-        triage_json = updated_triage.model_dump_json()
 
-    # Update database
-    with db._get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            UPDATE web_incidents
-            SET status = ?, updated_at = ?, decision_by = ?, decision_at = ?,
-                decision_note = ?, original_severity = ?, triage_json = ?
-            WHERE id = ?
-            """,
-            (
-                new_status.value,
-                now.isoformat(),
-                decision.decided_by,
-                now.isoformat(),
-                decision.note,
-                original_severity.value if original_severity else None,
-                triage_json,
-                incident_id,
-            ),
+        _update_incident(
+            incident_id,
+            status=IncidentStatus.TRIAGED.value,
+            triage_json=triage.model_dump_json(),
         )
 
-    # Log decision
+        get_audit_service().log(
+            event_type="incident_triaged",
+            jira_key=incident_id,
+            component=incident.component,
+            severity=triage.severity.value,
+            action="ai_triage",
+            status="success",
+            details={
+                "incident_type": triage.incident_type.value,
+                "confidence": triage.confidence,
+                "risk_score": triage.risk_score,
+                "needs_human_review": triage.needs_human_review,
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"Triage failed for {incident_id}: {e}")
+        get_audit_service().log(
+            event_type="incident_triage_failed",
+            jira_key=incident_id,
+            component=incident.component,
+            action="ai_triage",
+            status="failure",
+            details={"error": str(e)},
+        )
+        raise HTTPException(status_code=500, detail=f"Triage failed: {e}")
+
+    return await get_incident(incident_id)
+
+
+@router.post("/incidents/{incident_id}/approve", response_model=StoredIncident)
+async def approve_incident(incident_id: str):
+    """Approve the AI triage for an incident."""
+    row = _get_incident_row(incident_id)
+    incident = _row_to_incident(row)
+
+    if not incident.triage:
+        raise HTTPException(status_code=400, detail="Incident has not been triaged yet")
+
+    now = datetime.utcnow()
+    _update_incident(
+        incident_id,
+        status=IncidentStatus.APPROVED.value,
+        decision_by="web-user",
+        decision_at=now.isoformat(),
+        decision_note="Approved via web UI",
+    )
+
     get_audit_service().log(
-        event_type="incident_decision",
+        event_type="incident_approved",
         jira_key=incident_id,
         component=incident.component,
-        severity=decision.new_severity.value if decision.new_severity else incident.triage.severity.value if incident.triage else None,
-        action=f"decision_{decision.action}",
+        severity=incident.triage.severity.value,
+        action="approve",
+        status="success",
+        details={},
+    )
+
+    return await get_incident(incident_id)
+
+
+@router.post("/incidents/{incident_id}/override", response_model=StoredIncident)
+async def override_incident(incident_id: str, req: OverrideRequest):
+    """Override severity and/or category for an incident."""
+    row = _get_incident_row(incident_id)
+    incident = _row_to_incident(row)
+
+    if not incident.triage:
+        raise HTTPException(status_code=400, detail="Incident has not been triaged yet")
+
+    # Update triage with overrides
+    triage_data = json.loads(row["triage_json"])
+    original_severity = triage_data.get("severity")
+    original_category = triage_data.get("incident_type")
+
+    if req.severity:
+        try:
+            new_sev = Severity(req.severity.upper())
+            triage_data["severity"] = new_sev.value
+            # Recalculate risk score
+            triage_data["risk_score"] = calculate_risk_score(
+                severity=new_sev,
+                confidence=triage_data.get("confidence", 0.5),
+                environment=incident.environment,
+            )
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid severity: {req.severity}")
+
+    if req.category:
+        try:
+            new_cat = IncidentType(req.category.lower())
+            triage_data["incident_type"] = new_cat.value
+            # Re-match runbooks
+            primary, alts = match_runbooks(new_cat, incident.title, incident.description)
+            triage_data["primary_runbook"] = primary.model_dump()
+            triage_data["alternative_runbooks"] = [a.model_dump() for a in alts]
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid category: {req.category}")
+
+    now = datetime.utcnow()
+    _update_incident(
+        incident_id,
+        status=IncidentStatus.OVERRIDDEN.value,
+        triage_json=json.dumps(triage_data),
+        decision_by="web-user",
+        decision_at=now.isoformat(),
+        decision_note=req.reason,
+        original_severity=original_severity,
+    )
+
+    get_audit_service().log(
+        event_type="incident_overridden",
+        jira_key=incident_id,
+        component=incident.component,
+        severity=triage_data.get("severity"),
+        action="override",
         status="success",
         details={
-            "decided_by": decision.decided_by,
-            "note": decision.note,
-            "original_severity": original_severity.value if original_severity else None,
-            "new_severity": decision.new_severity.value if decision.new_severity else None,
+            "reason": req.reason,
+            "original_severity": original_severity,
+            "new_severity": req.severity,
+            "original_category": original_category,
+            "new_category": req.category,
         },
     )
 
-    # Fetch and return updated incident
     return await get_incident(incident_id)
+
+
+@router.post("/incidents/{incident_id}/resolve", response_model=StoredIncident)
+async def resolve_incident(incident_id: str, req: ResolveRequest):
+    """Mark an incident as resolved."""
+    row = _get_incident_row(incident_id)
+    incident = _row_to_incident(row)
+
+    now = datetime.utcnow()
+    _update_incident(
+        incident_id,
+        status=IncidentStatus.RESOLVED.value,
+        decision_by="web-user",
+        decision_at=now.isoformat(),
+        decision_note=req.resolution_note,
+    )
+
+    get_audit_service().log(
+        event_type="incident_resolved",
+        jira_key=incident_id,
+        component=incident.component,
+        severity=incident.triage.severity.value if incident.triage else None,
+        action="resolve",
+        status="success",
+        details={"resolution_note": req.resolution_note},
+    )
+
+    return await get_incident(incident_id)
+
+
+@router.post("/incidents/{incident_id}/pir", response_model=PIRResponse)
+async def generate_pir_endpoint(incident_id: str):
+    """Generate Post-Incident Review for an incident."""
+    incident = await get_incident(incident_id)
+    audit_data = await get_audit_trail(incident_id)
+
+    markdown = generate_pir(incident, audit_data["events"])
+
+    get_audit_service().log(
+        event_type="pir_generated",
+        jira_key=incident_id,
+        component=incident.component,
+        action="generate_pir",
+        status="success",
+        details={},
+    )
+
+    return PIRResponse(
+        incident_id=incident_id,
+        title=incident.title,
+        markdown=markdown,
+    )
 
 
 @router.get("/incidents/{incident_id}/audit")
@@ -468,7 +558,6 @@ async def get_audit_trail(incident_id: str):
         )
         rows = [dict(row) for row in cursor.fetchall()]
 
-    # Parse details JSON
     for row in rows:
         if row.get("details"):
             try:
@@ -477,35 +566,6 @@ async def get_audit_trail(incident_id: str):
                 pass
 
     return {"incident_id": incident_id, "events": rows}
-
-
-@router.get("/incidents/{incident_id}/pir", response_model=PIRResponse)
-async def get_pir(incident_id: str):
-    """Generate Post-Incident Review for an incident."""
-    # Get incident
-    incident = await get_incident(incident_id)
-
-    # Get audit trail
-    audit_data = await get_audit_trail(incident_id)
-
-    # Generate PIR
-    markdown = generate_pir(incident, audit_data["events"])
-
-    # Log PIR generation
-    get_audit_service().log(
-        event_type="pir_generated",
-        jira_key=incident_id,
-        component=incident.component,
-        action="generate_pir",
-        status="success",
-        details={},
-    )
-
-    return PIRResponse(
-        incident_id=incident_id,
-        title=incident.title,
-        markdown=markdown,
-    )
 
 
 @router.get("/runbooks")
