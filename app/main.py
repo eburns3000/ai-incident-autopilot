@@ -3,14 +3,21 @@
 import logging
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app import __version__
 from app.config import get_settings
-from app.routers import webhook_router, health_router, metrics_router
+from app.routers import webhook_router, health_router, metrics_router, incidents_router
 from app.db import get_database
+
+# Frontend paths
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+STATIC_DIR = FRONTEND_DIR / "static"
 
 # Configure logging
 logging.basicConfig(
@@ -64,10 +71,28 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(metrics_router)
     app.include_router(webhook_router)
+    app.include_router(incidents_router)
+
+    # Mount static files
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/")
     async def root():
-        """Root endpoint."""
+        """Serve frontend index.html."""
+        index_path = FRONTEND_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+        return {
+            "name": "Incident Autopilot",
+            "version": __version__,
+            "status": "running",
+            "dry_run": settings.dry_run,
+        }
+
+    @app.get("/api-info")
+    async def api_info():
+        """API information endpoint."""
         return {
             "name": "Incident Autopilot",
             "version": __version__,

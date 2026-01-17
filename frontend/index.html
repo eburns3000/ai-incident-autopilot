@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Incident Autopilot</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>Incident Autopilot</h1>
+            <p class="subtitle">AI-Powered Incident Triage & Runbook Routing</p>
+        </header>
+
+        <nav>
+            <a href="#" onclick="showView('home')" class="nav-link active" data-view="home">Dashboard</a>
+            <a href="#" onclick="showView('create')" class="nav-link" data-view="create">New Incident</a>
+        </nav>
+
+        <main>
+            <!-- Home/List View -->
+            <section id="home-view" class="view active">
+                <div class="section-header">
+                    <h2>Recent Incidents</h2>
+                    <button onclick="loadIncidents()" class="btn btn-secondary">Refresh</button>
+                </div>
+                <div id="incidents-list" class="incidents-list">
+                    <p class="loading">Loading incidents...</p>
+                </div>
+            </section>
+
+            <!-- Create Incident View -->
+            <section id="create-view" class="view">
+                <h2>Submit New Incident</h2>
+                <form id="incident-form" onsubmit="submitIncident(event)">
+                    <div class="form-group">
+                        <label for="title">Title *</label>
+                        <input type="text" id="title" name="title" required minlength="5" maxlength="200"
+                               placeholder="Brief description of the incident">
+                    </div>
+                    <div class="form-group">
+                        <label for="description">Description *</label>
+                        <textarea id="description" name="description" required minlength="10" maxlength="5000"
+                                  placeholder="Detailed information about the incident, symptoms, impact..."></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="component">Component</label>
+                            <input type="text" id="component" name="component"
+                                   placeholder="e.g., api-gateway, database">
+                        </div>
+                        <div class="form-group">
+                            <label for="environment">Environment</label>
+                            <select id="environment" name="environment">
+                                <option value="prod">Production</option>
+                                <option value="staging">Staging</option>
+                                <option value="dev">Development</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="reporter">Reporter</label>
+                        <input type="text" id="reporter" name="reporter" placeholder="Your name">
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="submit-btn">
+                            Submit & Run AI Triage
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Incident Detail View -->
+            <section id="detail-view" class="view">
+                <div class="detail-header">
+                    <button onclick="showView('home')" class="btn btn-secondary">&larr; Back</button>
+                    <h2 id="detail-title">Incident Details</h2>
+                </div>
+                <div id="incident-detail" class="incident-detail">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </section>
+
+            <!-- PIR View -->
+            <section id="pir-view" class="view">
+                <div class="detail-header">
+                    <button onclick="showIncidentDetail(currentIncidentId)" class="btn btn-secondary">&larr; Back to Incident</button>
+                    <h2>Post-Incident Review</h2>
+                    <button onclick="downloadPIR()" class="btn btn-primary">Download Markdown</button>
+                </div>
+                <div id="pir-content" class="pir-content">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Demo App - No authentication required</p>
+            <p><small>Demo Token for AI: <code>incident-autopilot-demo-2024</code></small></p>
+        </footer>
+    </div>
+
+    <!-- Decision Modal -->
+    <div id="decision-modal" class="modal">
+        <div class="modal-content">
+            <h3>Make Decision</h3>
+            <form id="decision-form" onsubmit="submitDecision(event)">
+                <input type="hidden" id="decision-incident-id">
+                <div class="form-group">
+                    <label>Action</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="action" value="approve" required>
+                            <span class="radio-label approve">Approve Triage</span>
+                        </label>
+                        <label>
+                            <input type="radio" name="action" value="reject">
+                            <span class="radio-label reject">Reject Triage</span>
+                        </label>
+                        <label>
+                            <input type="radio" name="action" value="override">
+                            <span class="radio-label override">Override Severity</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group" id="severity-override-group" style="display: none;">
+                    <label for="new-severity">New Severity</label>
+                    <select id="new-severity" name="new_severity">
+                        <option value="P1">P1 - Critical</option>
+                        <option value="P2">P2 - High</option>
+                        <option value="P3">P3 - Medium</option>
+                        <option value="P4">P4 - Low</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="decision-note">Note (optional)</label>
+                    <textarea id="decision-note" name="note" placeholder="Reason for this decision..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="decided-by">Your Name</label>
+                    <input type="text" id="decided-by" name="decided_by" placeholder="Anonymous">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Submit Decision</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
