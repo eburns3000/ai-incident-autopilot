@@ -1,81 +1,172 @@
 # Incident Autopilot
 
-Incident Autopilot is an AI assisted incident triage and governance demo designed to show how AI can support better decision making under pressure without removing human accountability.
+AI-Powered Incident Triage & Runbook Routing
 
-The project models how modern internal incident tools should work. AI proposes. Humans decide. Everything is auditable.
+## Overview
 
-## What this project demonstrates
+Incident Autopilot is a web-based application that automates the incident management process using AI to analyze, classify, and route incidents. The system provides intelligent triage capabilities with severity assessment, risk scoring, and recommended actions.
 
-AI assisted incident triage with severity risk and confidence scoring  
-Human in the loop governance with approve override and resolve actions  
-Clear P1 through P4 severity signaling  
-Explicit incident status lifecycle  
-Full audit trail of every decision  
-Post incident review generation  
-Production style internal tooling user interface
+## Features
 
-This is not a chatbot or automation demo. It is a decision support system.
-
-## Core features
+### Dashboard
+- **Recent Incidents View**: Displays all recent incidents with key metadata
+- **Real-time Status Updates**: Track incident status (triaged, overridden, resolved, approved)
+- **Quick Actions**: Access triage, approve, override, resolve, and PIR generation functions directly from the dashboard
+- **Severity Indicators**: Visual priority markers (P1, P2, P4) for quick assessment
+- **Risk Scoring**: Percentage-based risk assessment for each incident
 
 ### Incident Management
 
-Create and view incidents in a dashboard style interface.  
-Each incident includes severity P1 through P4 current status and timestamped history.
+#### Create New Incident
+- **Title**: Descriptive incident name
+- **Description**: Detailed incident information with prompts for context
+- **Component**: Specify affected system component
+- **Environment**: Select environment (e.g., prod, staging)
+- **Reporter**: Track who reported the incident
+- **Demo Data**: Quick-fill option for testing purposes
 
-### AI Triage
+#### Incident Details View
+Each incident displays:
+- Unique ID
+- Component and Environment
+- Reporter information
+- Creation timestamp
+- Full description
+- Current status (triaged, overridden, resolved, approved)
 
-AI performs initial triage on an incident and outputs suggested severity risk assessment and confidence level.  
-AI output is advisory only and cannot take final action.
+### AI Triage System
 
-### Human in the Loop Controls
+The AI Triage feature automatically analyzes incidents and provides:
 
-Users can approve AI recommendations override AI decisions or manually resolve incidents.  
-All actions require explicit user intent.
+#### Severity Classification
+- **P1**: Critical priority incidents (e.g., security breaches)
+- **P2**: High priority incidents (e.g., deployment issues, API errors)
+- **P4**: Lower priority incidents (e.g., application issues)
 
-### Audit Trail
+#### Confidence Metrics
+- AI confidence score (typically 85%)
+- Risk score percentage (ranging from 45% to 75%)
 
-Every action is logged including AI triage events human approvals overrides and resolutions.  
-The audit log is immutable and visible in the interface.
+#### Incident Categorization
+- **Security**: Unauthorized access, breaches
+- **Deployment**: Post-deployment issues
+- **Application**: Frontend/application-related issues
 
-### Post Incident Review
+#### Team Routing
+- Automatic assignment to owner teams (e.g., data-platform, platform, engineering)
+- Human review flag (Needs Human Review: TRUE/FALSE)
 
-After an incident is resolved a post incident review can be generated.  
-The review summarizes incident context AI recommendations human decisions and final outcome.  
-This supports learning and continuous improvement.
+### Actions Available
 
-### Production Style User Interface
+#### Primary Actions
+- **Run Triage**: Trigger AI analysis of the incident
+- **Approve**: Accept the incident and recommendations
+- **Override**: Manually adjust AI decisions
+- **Resolve**: Mark incident as resolved
+- **Generate PIR**: Create Post-Incident Review documentation
 
-Clean internal tool layout with clear visual hierarchy for severity status and actions.  
-Purposefully minimal and optimized for clarity rather than aesthetics.  
-Designed to resemble real world SRE and incident response tooling.
+#### Audit Trail
+- All actions (Approve/Override/Resolve) are logged in the audit trail
+- Full transparency and accountability for incident handling
 
-## Why this project exists
+### Recommended Actions
+The system provides intelligent recommendations based on the incident analysis, or indicates when no specific actions are recommended.
 
-Many AI demos focus on automation.  
-Real organizations require trust governance and accountability.
+## Demo Mode
 
-This project explores how AI can reduce cognitive load during incidents improve consistency of initial triage preserve human ownership of decisions and maintain a clear audit trail for compliance and review.
+The application includes a demo-safe mode with:
+- No authentication required
+- Pre-populated test data
+- Audit trail and PIR generation enabled
+- Full feature access for evaluation
 
-## Running locally
+## Example Incidents
 
-git clone https://github.com/eburns3000/ai-incident-autopilot.git  
-cd ai-incident-autopilot  
-Follow setup steps in the repository.
+Based on the screenshots, here are typical incident types the system handles:
 
-The application runs locally at http://localhost:8080
+### 1. Security Breach
+- **ID**: f4ec8554
+- **Component**: db
+- **Environment**: prod
+- **Description**: Unauthorized access to database
+- **Status**: overridden
+- **Severity**: P1
+- **Risk Score**: 75%
+- **Owner Team**: data-platform
 
-This project is intended to be run locally. A public deployment is not required for evaluation.
+### 2. API Errors
+- **ID**: 713385ac
+- **Component**: checkout-api
+- **Environment**: prod
+- **Description**: The checkout API is returning 500 errors for about 30% of requests. Started 10 minutes ago after a deployment.
+- **Status**: approved
+- **Severity**: P2
+- **Risk Score**: 65%
+- **Type**: deployment
+- **Owner Team**: platform
 
-## Intended audience
+### 3. Test Incidents
+- **ID**: 53bf2039
+- **Component**: test-service
+- **Environment**: prod
+- **Description**: Testing the updated frontend
+- **Status**: triaged
+- **Severity**: P4
+- **Risk Score**: 45%
+- **Type**: application
+- **Owner Team**: engineering
 
-Hiring managers  
-Technical project managers  
-SRE and operations leaders  
-AI governance and risk teams
+## Technical Details
 
-The project is designed to be reviewed through code screenshots and documentation rather than a public live demo.
+- **Application URL**: localhost:8080
+- **Interface**: Web-based UI with responsive design
+- **Authentication**: Optional (can run in no-login mode)
+- **Features**: Toggleable Demo-safe mode, Audit trail, PIR generation
 
-## Status
+## UI Navigation
+
+### Header
+- Application title: "Incident Autopilot"
+- Subtitle: "AI-Powered Incident Triage & Runbook Routing"
+- Mode indicators: Demo-safe, No login, Audit trail + PIR
+
+### Main Navigation
+- **Dashboard**: View all recent incidents
+- **New Incident**: Create new incident reports
+
+### Color Coding
+- **Green (P4)**: Low priority
+- **Yellow/Orange (P2)**: High priority
+- **Red (P1)**: Critical priority
+
+## User Interface Features
+
+- Clean, modern design with blue gradient header
+- Card-based incident display
+- Action buttons prominently displayed
+- Status badges for quick visual reference
+- Refresh capability for real-time updates
+- Back navigation for detailed views
+
+## Workflow
+
+1. **Incident Creation**: User reports incident with details
+2. **AI Analysis**: System automatically triages upon creation or manual trigger
+3. **Review**: Teams review AI recommendations and metrics
+4. **Action**: Approve, override, or resolve based on assessment
+5. **Documentation**: Generate PIR for closed incidents
+6. **Audit**: All actions tracked in audit trail
+
+## Benefits
+
+- **Automated Triage**: Reduces manual effort in incident classification
+- **Consistent Assessment**: AI provides objective severity and risk scoring
+- **Faster Response**: Quick routing to appropriate teams
+- **Audit Compliance**: Complete trail of all incident actions
+- **Data-Driven**: Confidence and risk metrics support decision-making
+
+---
+
+*Note: This is a demo/development application running on localhost:8080
 
 Complete. This version represents a finished end to end artifact.
